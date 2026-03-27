@@ -1,3 +1,0 @@
-cosl
-ops<4,>=3
-PyYAML
