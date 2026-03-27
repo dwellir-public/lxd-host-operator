@@ -1,0 +1,38 @@
+name: lxd-host
+type: charm
+title: LXD Host
+
+platforms:
+  ubuntu@22.04:amd64:
+  ubuntu@24.04:amd64:
+
+summary: Machine charm for observability-only management of an existing LXD host.
+
+description: |
+  The lxd-host machine charm validates a pre-installed LXD snap, inventories the
+  local daemon, and will later manage metrics and log integrations without
+  installing or bootstrapping LXD itself.
+
+parts:
+  charm:
+    plugin: uv
+    source: .
+    build-snaps:
+      - astral-uv
+
+peers:
+  cluster:
+    interface: lxd_host_peers
+
+provides:
+  metrics-endpoint:
+    interface: prometheus_scrape
+    description: LXD metrics scrape target for observability consumers.
+
+requires:
+  logging:
+    interface: loki_push_api
+    description: Direct Loki sink for native LXD log forwarding.
+  syslog:
+    interface: syslog
+    description: Alloy-style remote syslog receiver for host forwarding.

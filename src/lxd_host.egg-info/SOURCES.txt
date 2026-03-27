@@ -1,0 +1,14 @@
+pyproject.toml
+src/charm.py
+src/cluster_state.py
+src/inventory.py
+src/logging_config.py
+src/lxd.py
+src/metrics.py
+src/status.py
+src/syslog_forwarder.py
+src/lxd_host.egg-info/PKG-INFO
+src/lxd_host.egg-info/SOURCES.txt
+src/lxd_host.egg-info/dependency_links.txt
+src/lxd_host.egg-info/requires.txt
+src/lxd_host.egg-info/top_level.txt

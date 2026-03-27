@@ -1,0 +1,8 @@
+charm
+cluster_state
+inventory
+logging_config
+lxd
+metrics
+status
+syslog_forwarder

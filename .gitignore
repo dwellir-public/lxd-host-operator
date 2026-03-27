@@ -1,0 +1,9 @@
+.coverage
+.pytest_cache/
+.ruff_cache/
+.ssh/
+.tox/
+.venv/
+__pycache__/
+*.pyc
+*.charm
