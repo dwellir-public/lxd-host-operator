@@ -89,7 +89,9 @@ class LxdHostCharm(ops.CharmBase):
             return
 
         metrics_enabled = (
-            metrics.reconcile(self) if reconcile_metrics else metrics.has_metrics_relation(self)
+            metrics.reconcile(self, local_inventory)
+            if reconcile_metrics
+            else metrics.has_metrics_relation(self)
         )
         try:
             logging_enabled = (
@@ -153,7 +155,12 @@ class LxdHostCharm(ops.CharmBase):
     def _on_relation_broken(self, event: ops.RelationBrokenEvent) -> None:
         """Cleanup trust for a broken metrics relation and reconcile remaining state."""
         if event.relation.name == metrics.METRICS_RELATION_NAME:
-            metrics.cleanup_relation(self, event.relation)
+            try:
+                local_inventory = inventory.collect_local_inventory()
+            except lxd.LXDValidationError as exc:
+                self.unit.status = ops.BlockedStatus(f"LXD unavailable: {exc}")
+                return
+            metrics.cleanup_relation(self, event.relation, local_inventory)
             self._on_reconcile(event)
             return
         if event.relation.name == cluster_state.PEER_RELATION_NAME:

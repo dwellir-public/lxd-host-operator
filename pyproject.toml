@@ -1,10 +1,10 @@
 [project]
 name = "lxd-host"
 version = "0.0.1"
-requires-python = ">=3.10"
+requires-python = ">=3.8"
 dependencies = [
     "cosl",
-    "ops>=3,<4",
+    "ops>=2,<4",
     "PyYAML",
 ]
 
@@ -16,7 +16,7 @@ lint = [
 ]
 unit = [
     "coverage[toml]",
-    "ops[testing]",
+    "ops[testing]>=2,<4",
     "pytest",
 ]
 integration = [

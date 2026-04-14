@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from typing import Optional
 
 import ops
 
@@ -162,7 +163,7 @@ def collect_peer_states(
     return states
 
 
-def parse_peer_unit_state(databag: ops.RelationDataContent) -> PeerUnitState | None:
+def parse_peer_unit_state(databag: ops.RelationDataContent) -> Optional[PeerUnitState]:
     """Parse one peer unit databag into a structured unit state."""
     try:
         snap_version = databag["snap_version"]
@@ -187,6 +188,6 @@ def parse_peer_unit_state(databag: ops.RelationDataContent) -> PeerUnitState | N
     )
 
 
-def peer_relation(charm: ops.CharmBase) -> ops.Relation | None:
+def peer_relation(charm: ops.CharmBase) -> Optional[ops.Relation]:
     """Return the peer relation object when it exists."""
     return charm.model.get_relation(PEER_RELATION_NAME)

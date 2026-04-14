@@ -5,7 +5,7 @@
 - `uv`
 - `tox`
 - `charmcraft`
-- Python 3.10 or newer
+- Python 3.8 or newer
 
 ## Local setup
 
@@ -32,6 +32,7 @@ To build a specific base artifact explicitly:
 ```bash
 charmcraft pack --platform ubuntu@22.04:amd64
 charmcraft pack --platform ubuntu@24.04:amd64
+charmcraft pack --platform ubuntu@20.04:amd64
 ```
 
 ## Integration tests

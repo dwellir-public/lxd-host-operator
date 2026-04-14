@@ -51,7 +51,7 @@ def test_start_reports_active_status_with_snap_version(monkeypatch):
             metrics_address="",
         ),
     )
-    monkeypatch.setattr("charm.metrics.reconcile", lambda charm: False)
+    monkeypatch.setattr("charm.metrics.reconcile", lambda charm, inventory: False)
     monkeypatch.setattr("charm.logging_config.reconcile", lambda charm, inventory: False)
 
     state_out = ctx.run(ctx.on.start(), testing.State())
@@ -73,7 +73,7 @@ def test_leader_elected_sets_workload_version(monkeypatch):
             metrics_address="",
         ),
     )
-    monkeypatch.setattr("charm.metrics.reconcile", lambda charm: False)
+    monkeypatch.setattr("charm.metrics.reconcile", lambda charm, inventory: False)
     monkeypatch.setattr("charm.logging_config.reconcile", lambda charm, inventory: False)
 
     state_out = ctx.run(ctx.on.leader_elected(), testing.State(leader=True))
@@ -282,7 +282,7 @@ def test_logging_relation_configures_lxd_for_direct_loki(monkeypatch):
             metrics_address="",
         ),
     )
-    monkeypatch.setattr("charm.metrics.reconcile", lambda charm: False)
+    monkeypatch.setattr("charm.metrics.reconcile", lambda charm, inventory: False)
     monkeypatch.setattr(
         "charm.logging_config.active_loki_endpoint",
         lambda charm: "http://loki.example:3100",
@@ -351,7 +351,7 @@ def test_update_status_without_logging_relation_clears_loki_keys(monkeypatch):
             metrics_address="",
         ),
     )
-    monkeypatch.setattr("charm.metrics.reconcile", lambda charm: False)
+    monkeypatch.setattr("charm.metrics.reconcile", lambda charm, inventory: False)
     monkeypatch.setattr("charm.logging_config.active_loki_endpoint", lambda charm: None)
     monkeypatch.setattr("charm.logging_config.active_syslog_target", lambda charm: None)
     existing_values = {
@@ -401,7 +401,7 @@ def test_syslog_relation_enables_daemon_syslog_and_forwarder(monkeypatch):
             metrics_address="",
         ),
     )
-    monkeypatch.setattr("charm.metrics.reconcile", lambda charm: False)
+    monkeypatch.setattr("charm.metrics.reconcile", lambda charm, inventory: False)
     monkeypatch.setattr("charm.logging_config.active_loki_endpoint", lambda charm: None)
     monkeypatch.setattr("logging_config.lxd.get_config", lambda key: "")
     monkeypatch.setattr("logging_config.lxd.get_snap_option", lambda key: "")
@@ -535,7 +535,9 @@ def test_logging_relation_does_not_reconcile_metrics(monkeypatch):
     )
     monkeypatch.setattr(
         "charm.metrics.reconcile",
-        lambda charm: (_ for _ in ()).throw(AssertionError("metrics should not run")),
+        lambda charm, inventory: (_ for _ in ()).throw(
+            AssertionError("metrics should not run")
+        ),
     )
     monkeypatch.setattr("charm.metrics.has_metrics_relation", lambda charm: True)
     monkeypatch.setattr("charm.logging_config.reconcile", lambda charm, inventory: True)
@@ -568,7 +570,7 @@ def test_transient_loki_error_sets_waiting_status(monkeypatch):
             metrics_address="",
         ),
     )
-    monkeypatch.setattr("charm.metrics.reconcile", lambda charm: False)
+    monkeypatch.setattr("charm.metrics.reconcile", lambda charm, inventory: False)
     monkeypatch.setattr(
         "charm.logging_config.reconcile",
         lambda charm, inventory: (_ for _ in ()).throw(
@@ -621,6 +623,130 @@ def test_ensure_metrics_certificate_trusted_ignores_missing_remove(monkeypatch):
     assert ("lxc", "config", "trust", "remove", "abc") in calls
 
 
+def test_ensure_metrics_certificate_trusted_ignores_raced_add(monkeypatch):
+    """A concurrent add should be accepted once the desired cert is visible."""
+    module = __import__("lxd")
+    entries = [
+        module.TrustEntry(
+            name="juju-lxd-host-metrics-1",
+            fingerprint="abc",
+            certificate="old-cert",
+            type="metrics",
+        )
+    ]
+
+    def _list_trust_entries():
+        return list(entries)
+
+    def _retry_command(*args, **kwargs):
+        if args[:5] == ("lxc", "config", "trust", "remove", "abc"):
+            entries.clear()
+            return ""
+        if args[:4] == ("lxc", "config", "trust", "add"):
+            entries.append(
+                module.TrustEntry(
+                    name="juju-lxd-host-metrics-1",
+                    fingerprint="new",
+                    certificate="new-cert",
+                    type="metrics",
+                )
+            )
+            raise LXDValidationError("Error: Certificate already in trust store")
+        return ""
+
+    monkeypatch.setattr("lxd.list_trust_entries", _list_trust_entries)
+    monkeypatch.setattr("lxd.retry_command", _retry_command)
+
+    module.ensure_metrics_certificate_trusted(
+        trust_name="juju-lxd-host-metrics-1",
+        certificate_pem="new-cert",
+    )
+
+    assert entries == [
+        module.TrustEntry(
+            name="juju-lxd-host-metrics-1",
+            fingerprint="new",
+            certificate="new-cert",
+            type="metrics",
+        )
+    ]
+
+
+def test_cluster_follower_skips_trust_reconciliation(monkeypatch):
+    """Cluster followers should not mutate the shared LXD trust store."""
+    ctx = _context()
+    peer = PeerRelation(
+        endpoint="cluster",
+        interface="lxd_host_peers",
+        local_app_data={
+            "metrics_client_cert": (
+                "-----BEGIN CERTIFICATE-----\npeer\n-----END CERTIFICATE-----\n"
+            ),
+            "metrics_client_key": (
+                "-----BEGIN PRIVATE KEY-----\npeer\n-----END PRIVATE KEY-----\n"
+            ),
+            "metrics_trust_name": "juju-lxd-host-metrics-1",
+        },
+        peers_data={
+            1: {
+                "snap_version": "5.21.3",
+                "snap_revision": "33110",
+                "server_version": "6.1",
+                "server_name": "lxd-node1",
+                "server_clustered": "true",
+                "cluster_members": '["lxd-node1", "lxd-node2", "lxd-node3"]',
+                "metrics_enabled": "true",
+                "log_sink": "none",
+            },
+            2: {
+                "snap_version": "5.21.3",
+                "snap_revision": "33110",
+                "server_version": "6.1",
+                "server_name": "lxd-node3",
+                "server_clustered": "true",
+                "cluster_members": '["lxd-node1", "lxd-node2", "lxd-node3"]',
+                "metrics_enabled": "true",
+                "log_sink": "none",
+            },
+        },
+    )
+    relation = Relation("metrics-endpoint", interface="prometheus_scrape", remote_app_name="alloy")
+    configured: list[tuple[str, str]] = []
+
+    monkeypatch.setattr(
+        "charm.inventory.collect_local_inventory",
+        lambda: LocalLXDInventory(
+            snap_version="5.21.3",
+            snap_revision="33110",
+            server_version="6.1",
+            server_name="lxd-node2",
+            server_clustered=True,
+            cluster_members=("lxd-node1", "lxd-node2", "lxd-node3"),
+            metrics_address="",
+        ),
+    )
+    monkeypatch.setattr("metrics.lxd.get_config", lambda key: "")
+    monkeypatch.setattr(
+        "metrics.lxd.set_config",
+        lambda key, value: configured.append((key, value)),
+    )
+    monkeypatch.setattr(
+        "metrics.lxd.ensure_metrics_certificate_trusted",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("unexpected trust mutation")),
+    )
+    monkeypatch.setattr("charm.logging_config.reconcile", lambda charm, inventory: False)
+
+    state_out = ctx.run(
+        ctx.on.update_status(),
+        testing.State(relations=[peer, relation], leader=False, planned_units=3),
+    )
+
+    assert configured == [("core.metrics_address", "192.0.2.0:8444")]
+    assert state_out.unit_status == testing.ActiveStatus(
+        "snap 5.21.3 rev 33110, cluster member lxd-node2"
+    )
+
+
 def test_leader_reports_healthy_cluster_summary(monkeypatch):
     """A consistent 3-node cluster should render a healthy aggregate summary."""
     ctx = _context()
@@ -663,7 +789,7 @@ def test_leader_reports_healthy_cluster_summary(monkeypatch):
             metrics_address="",
         ),
     )
-    monkeypatch.setattr("charm.metrics.reconcile", lambda charm: False)
+    monkeypatch.setattr("charm.metrics.reconcile", lambda charm, inventory: False)
     monkeypatch.setattr("charm.logging_config.reconcile", lambda charm, inventory: False)
 
     state_out = ctx.run(
@@ -707,7 +833,7 @@ def test_leader_blocks_on_mixed_cluster_state(monkeypatch):
             metrics_address="",
         ),
     )
-    monkeypatch.setattr("charm.metrics.reconcile", lambda charm: False)
+    monkeypatch.setattr("charm.metrics.reconcile", lambda charm, inventory: False)
     monkeypatch.setattr("charm.logging_config.reconcile", lambda charm, inventory: False)
 
     state_out = ctx.run(

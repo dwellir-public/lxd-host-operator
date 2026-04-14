@@ -7,6 +7,7 @@ import subprocess
 import tempfile
 import time
 from dataclasses import dataclass
+from typing import Optional
 
 
 class LXDValidationError(RuntimeError):
@@ -56,6 +57,11 @@ class TrustEntry:
     fingerprint: str
     certificate: str
     type: str
+
+
+def normalize_pem(pem: str) -> str:
+    """Normalize PEM text so equivalent certificates compare equal."""
+    return "\n".join(line.rstrip() for line in pem.strip().splitlines())
 
 
 def run_command(*args: str) -> str:
@@ -158,7 +164,7 @@ def unset_snap_option(key: str) -> None:
 
 def retry_command(*args: str, attempts: int = 10, delay_seconds: float = 2.0) -> str:
     """Run an LXD command repeatedly to smooth over short-lived daemon validation races."""
-    last_error: LXDValidationError | None = None
+    last_error: Optional[LXDValidationError] = None
     for attempt in range(1, attempts + 1):
         try:
             return run_command(*args)
@@ -195,13 +201,14 @@ def list_trust_entries() -> list[TrustEntry]:
 
 def ensure_metrics_certificate_trusted(*, trust_name: str, certificate_pem: str) -> None:
     """Ensure a metrics client certificate is present in the LXD trust store."""
+    desired_certificate = normalize_pem(certificate_pem)
     for entry in list_trust_entries():
         if entry.name != trust_name:
             continue
-        if entry.type == "metrics" and entry.certificate == certificate_pem:
+        if entry.type == "metrics" and normalize_pem(entry.certificate) == desired_certificate:
             return
         try:
-            run_command("lxc", "config", "trust", "remove", entry.fingerprint)
+            retry_command("lxc", "config", "trust", "remove", entry.fingerprint)
         except LXDValidationError as exc:
             if "Certificate not found" not in str(exc):
                 raise
@@ -210,16 +217,26 @@ def ensure_metrics_certificate_trusted(*, trust_name: str, certificate_pem: str)
         cert_file.write(certificate_pem)
         cert_path = cert_file.name
     try:
-        run_command(
-            "lxc",
-            "config",
-            "trust",
-            "add",
-            cert_path,
-            "--name",
-            trust_name,
-            "--type=metrics",
-        )
+        try:
+            retry_command(
+                "lxc",
+                "config",
+                "trust",
+                "add",
+                cert_path,
+                "--name",
+                trust_name,
+                "--type=metrics",
+            )
+        except LXDValidationError as exc:
+            if "Certificate already in trust store" not in str(exc):
+                raise
+            for entry in list_trust_entries():
+                if entry.type != "metrics":
+                    continue
+                if normalize_pem(entry.certificate) == desired_certificate:
+                    return
+            raise
     finally:
         try:
             subprocess.run(("rm", "-f", cert_path), check=False)

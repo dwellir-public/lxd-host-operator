@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Optional
 
 import ops
 
@@ -74,7 +75,7 @@ def reconcile(charm: ops.CharmBase, local_inventory) -> bool:
     return True
 
 
-def active_loki_endpoint(charm: ops.CharmBase) -> str | None:
+def active_loki_endpoint(charm: ops.CharmBase) -> Optional[str]:
     """Return one deterministic Loki base endpoint from the consumer library."""
     endpoints = [
         normalise_loki_endpoint(endpoint.get("url", "").strip())
@@ -89,10 +90,13 @@ def active_loki_endpoint(charm: ops.CharmBase) -> str | None:
 
 def normalise_loki_endpoint(endpoint_url: str) -> str:
     """Convert a Loki push URL into the base URL expected by LXD."""
-    return endpoint_url.removesuffix("/loki/api/v1/push")
+    suffix = "/loki/api/v1/push"
+    if endpoint_url.endswith(suffix):
+        return endpoint_url[: -len(suffix)]
+    return endpoint_url
 
 
-def active_syslog_target(charm: ops.CharmBase) -> SyslogRelationTarget | None:
+def active_syslog_target(charm: ops.CharmBase) -> Optional[SyslogRelationTarget]:
     """Return one ready remote syslog receiver from the `syslog` relation data."""
     candidates: list[SyslogRelationTarget] = []
     for relation in charm.model.relations.get(SYSLOG_RELATION_NAME, []):

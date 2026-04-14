@@ -7,11 +7,13 @@ import json
 import subprocess
 import tempfile
 from dataclasses import dataclass
+from typing import Optional
 
 import ops
 
 import cluster_state
 import lxd
+from inventory import LocalLXDInventory
 
 METRICS_RELATION_NAME = "metrics-endpoint"
 METRICS_PORT = 8444
@@ -38,7 +40,7 @@ def has_metrics_relation(charm: ops.CharmBase) -> bool:
     return bool(charm.model.relations[METRICS_RELATION_NAME])
 
 
-def reconcile(charm: ops.CharmBase) -> bool:
+def reconcile(charm: ops.CharmBase, local_inventory: LocalLXDInventory) -> bool:
     """Reconcile the metrics listener, local trust, and scrape jobs for all relations."""
     charm._metrics_provider.update_scrape_job_spec(base_scrape_jobs())
     if not has_metrics_relation(charm):
@@ -51,10 +53,11 @@ def reconcile(charm: ops.CharmBase) -> bool:
         if credentials is None:
             continue
         credentials_by_relation_id[relation.id] = credentials
-        lxd.ensure_metrics_certificate_trusted(
-            trust_name=credentials.trust_name,
-            certificate_pem=credentials.certificate_pem,
-        )
+        if should_manage_trust_store(charm, local_inventory):
+            lxd.ensure_metrics_certificate_trusted(
+                trust_name=credentials.trust_name,
+                certificate_pem=credentials.certificate_pem,
+            )
         if charm.unit.is_leader():
             relation.data[charm.app]["scrape_jobs"] = json.dumps(scrape_jobs(credentials))
 
@@ -69,8 +72,14 @@ def publish_unit_metadata(
     relation.data[charm.unit][METRICS_JOB_NAME_FIELD] = local_inventory.server_name
 
 
-def cleanup_relation(charm: ops.CharmBase, relation: ops.Relation) -> None:
+def cleanup_relation(
+    charm: ops.CharmBase,
+    relation: ops.Relation,
+    local_inventory: LocalLXDInventory,
+) -> None:
     """Remove the local trust entry that was created for one metrics relation."""
+    if not should_manage_trust_store(charm, local_inventory):
+        return
     trust_name = ""
     if charm.unit.is_leader():
         trust_name = relation.data[charm.app].get(TRUST_NAME_FIELD, "").strip()
@@ -80,6 +89,14 @@ def cleanup_relation(charm: ops.CharmBase, relation: ops.Relation) -> None:
             trust_name = credentials.trust_name
     if trust_name:
         lxd.remove_trusted_certificate_by_name(trust_name)
+
+
+def should_manage_trust_store(
+    charm: ops.CharmBase,
+    local_inventory: LocalLXDInventory,
+) -> bool:
+    """Return whether this unit should mutate the local or clustered trust store."""
+    return not local_inventory.server_clustered or charm.unit.is_leader()
 
 
 def base_scrape_jobs() -> list[dict]:
@@ -129,7 +146,7 @@ def disable_metrics_listener() -> None:
 def relation_credentials(
     charm: ops.CharmBase,
     relation: ops.Relation,
-) -> MetricsCredentials | None:
+) -> Optional[MetricsCredentials]:
     """Return or create the metrics credentials published on one relation."""
     if not charm.unit.is_leader():
         return peer_relation_credentials(charm)
@@ -150,7 +167,7 @@ def relation_credentials(
     return credentials
 
 
-def peer_relation_credentials(charm: ops.CharmBase) -> MetricsCredentials | None:
+def peer_relation_credentials(charm: ops.CharmBase) -> Optional[MetricsCredentials]:
     """Read the leader-published metrics credentials from peer app data for followers."""
     relation = charm.model.get_relation(cluster_state.PEER_RELATION_NAME)
     if relation is None:
@@ -171,7 +188,7 @@ def mirror_peer_credentials(charm: ops.CharmBase, credentials: MetricsCredential
 
 def credentials_from_mapping(
     mapping: ops.RelationDataContent,
-) -> MetricsCredentials | None:
+) -> Optional[MetricsCredentials]:
     """Parse metrics credentials from one relation databag-like mapping."""
     certificate_pem = mapping.get(CERTIFICATE_FIELD, "").strip()
     private_key_pem = mapping.get(PRIVATE_KEY_FIELD, "").strip()
