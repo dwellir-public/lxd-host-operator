@@ -39,6 +39,7 @@ class LxdHostCharm(ops.CharmBase):
             forward_alert_rules=False,
         )
         framework.observe(self.on.install, self._on_reconcile)
+        framework.observe(self.on.upgrade_charm, self._on_reconcile)
         framework.observe(self.on.start, self._on_reconcile)
         framework.observe(self.on.update_status, self._on_reconcile)
         framework.observe(self.on.leader_elected, self._on_reconcile)
@@ -103,7 +104,9 @@ class LxdHostCharm(ops.CharmBase):
                 )
             )
         except logging_config.TransientLokiError as exc:
-            self.unit.status = ops.WaitingStatus(f"Waiting for Loki readiness: {exc}")
+            self.unit.status = status.render_waiting_status(
+                local_inventory, f"Waiting for Loki readiness: {exc}"
+            )
             return
         log_sink = "none"
         if logging_config.active_loki_endpoint(self):
@@ -120,7 +123,9 @@ class LxdHostCharm(ops.CharmBase):
         if self.unit.is_leader():
             self.unit.set_workload_version(local_inventory.server_version)
         if not cluster_assessment.healthy:
-            self.unit.status = ops.BlockedStatus(cluster_assessment.message)
+            self.unit.status = status.render_blocked_status(
+                local_inventory, cluster_assessment.message
+            )
             return
         self.unit.status = status.render_unit_status(local_inventory, cluster_assessment.summary)
 

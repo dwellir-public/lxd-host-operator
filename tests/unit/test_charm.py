@@ -56,7 +56,34 @@ def test_start_reports_active_status_with_snap_version(monkeypatch):
 
     state_out = ctx.run(ctx.on.start(), testing.State())
 
-    assert state_out.unit_status == testing.ActiveStatus("snap 5.21.3 rev 33110, standalone")
+    assert state_out.unit_status == testing.ActiveStatus(
+        "lxd-node1: snap 5.21.3 rev 33110, standalone"
+    )
+
+
+def test_upgrade_charm_reconciles_status(monkeypatch):
+    """Upgrade charm should recompute unit status using the current local inventory."""
+    ctx = _context()
+
+    monkeypatch.setattr(
+        "charm.inventory.collect_local_inventory",
+        lambda: LocalLXDInventory(
+            snap_version="5.21.3",
+            snap_revision="33110",
+            server_version="5.21.3",
+            server_name="lxd-node1",
+            server_clustered=False,
+            metrics_address="",
+        ),
+    )
+    monkeypatch.setattr("charm.metrics.reconcile", lambda charm, inventory: False)
+    monkeypatch.setattr("charm.logging_config.reconcile", lambda charm, inventory: False)
+
+    state_out = ctx.run(ctx.on.upgrade_charm(), testing.State())
+
+    assert state_out.unit_status == testing.ActiveStatus(
+        "lxd-node1: snap 5.21.3 rev 33110, standalone"
+    )
 
 
 def test_leader_elected_sets_workload_version(monkeypatch):
@@ -80,7 +107,7 @@ def test_leader_elected_sets_workload_version(monkeypatch):
 
     assert state_out.workload_version == "6.1"
     assert state_out.unit_status == testing.ActiveStatus(
-        "snap 5.21.3 rev 33110, cluster member lxd-node1"
+        "lxd-node1: snap 5.21.3 rev 33110, cluster member lxd-node1"
     )
 
 
@@ -156,7 +183,9 @@ def test_update_status_without_metrics_relation_disables_listener(monkeypatch):
     state_out = ctx.run(ctx.on.update_status(), testing.State())
 
     assert calls == ["core.metrics_address"]
-    assert state_out.unit_status == testing.ActiveStatus("snap 5.21.3 rev 33110, standalone")
+    assert state_out.unit_status == testing.ActiveStatus(
+        "lxd-node1: snap 5.21.3 rev 33110, standalone"
+    )
 
 
 def test_non_leader_metrics_relation_uses_peer_credentials(monkeypatch):
@@ -213,7 +242,9 @@ def test_non_leader_metrics_relation_uses_peer_credentials(monkeypatch):
         )
     ]
     assert configured == [("core.metrics_address", "192.0.2.0:8444")]
-    assert state_out.unit_status == testing.ActiveStatus("snap 5.21.3 rev 33110, standalone")
+    assert state_out.unit_status == testing.ActiveStatus(
+        "lxd-node2: snap 5.21.3 rev 33110, standalone"
+    )
 
 
 def test_non_leader_metrics_relation_broken_uses_peer_trust_name(monkeypatch):
@@ -261,7 +292,9 @@ def test_non_leader_metrics_relation_broken_uses_peer_trust_name(monkeypatch):
     )
 
     assert removed == ["juju-lxd-host-metrics-1"]
-    assert state_out.unit_status == testing.ActiveStatus("snap 5.21.3 rev 33110, standalone")
+    assert state_out.unit_status == testing.ActiveStatus(
+        "lxd-node2: snap 5.21.3 rev 33110, standalone"
+    )
 
 
 def test_logging_relation_configures_lxd_for_direct_loki(monkeypatch):
@@ -315,7 +348,9 @@ def test_logging_relation_configures_lxd_for_direct_loki(monkeypatch):
     assert ("loki.api.url", "http://loki.example:3100") in writes
     assert ("loki.types", "logging,lifecycle") in writes
     assert disabled_syslog == ["false"]
-    assert state_out.unit_status == testing.ActiveStatus("snap 5.21.3 rev 33110, standalone")
+    assert state_out.unit_status == testing.ActiveStatus(
+        "lxd-node1: snap 5.21.3 rev 33110, standalone"
+    )
 
 
 def test_active_loki_endpoint_picks_first_sorted_url():
@@ -368,7 +403,9 @@ def test_update_status_without_logging_relation_clears_loki_keys(monkeypatch):
     state_out = ctx.run(ctx.on.update_status(), testing.State())
 
     assert unsets == ["loki.api.url", "loki.types"]
-    assert state_out.unit_status == testing.ActiveStatus("snap 5.21.3 rev 33110, standalone")
+    assert state_out.unit_status == testing.ActiveStatus(
+        "lxd-node1: snap 5.21.3 rev 33110, standalone"
+    )
 
 
 def test_syslog_relation_enables_daemon_syslog_and_forwarder(monkeypatch):
@@ -426,7 +463,9 @@ def test_syslog_relation_enables_daemon_syslog_and_forwarder(monkeypatch):
     assert forwarded[0][1].application == "lxd-host"
     assert forwarded[0][1].unit == "lxd-host/0"
     assert forwarded[0][1].lxd_host == "lxd-node1"
-    assert state_out.unit_status == testing.ActiveStatus("snap 5.21.3 rev 33110, standalone")
+    assert state_out.unit_status == testing.ActiveStatus(
+        "lxd-node1: snap 5.21.3 rev 33110, standalone"
+    )
 
 
 def test_active_syslog_target_uses_ready_relation_data():
@@ -551,7 +590,9 @@ def test_logging_relation_does_not_reconcile_metrics(monkeypatch):
         testing.State(relations=[relation]),
     )
 
-    assert state_out.unit_status == testing.ActiveStatus("snap 5.21.3 rev 33110, standalone")
+    assert state_out.unit_status == testing.ActiveStatus(
+        "lxd-node1: snap 5.21.3 rev 33110, standalone"
+    )
 
 
 def test_transient_loki_error_sets_waiting_status(monkeypatch):
@@ -586,7 +627,7 @@ def test_transient_loki_error_sets_waiting_status(monkeypatch):
     )
 
     assert state_out.unit_status == testing.WaitingStatus(
-        "Waiting for Loki readiness: Loki is not ready, server returned HTTP status 404 Not Found"
+        "lxd-node1: Waiting for Loki readiness: Loki is not ready, server returned HTTP status 404 Not Found"
     )
 
 
@@ -743,7 +784,7 @@ def test_cluster_follower_skips_trust_reconciliation(monkeypatch):
 
     assert configured == [("core.metrics_address", "192.0.2.0:8444")]
     assert state_out.unit_status == testing.ActiveStatus(
-        "snap 5.21.3 rev 33110, cluster member lxd-node2"
+        "lxd-node2: snap 5.21.3 rev 33110, cluster member lxd-node2"
     )
 
 
@@ -798,7 +839,7 @@ def test_leader_reports_healthy_cluster_summary(monkeypatch):
     )
 
     assert state_out.unit_status == testing.ActiveStatus(
-        "snap 5.21.3 rev 33110, cluster member lxd-node1; cluster healthy 3 units/3 members"
+        "lxd-node1: snap 5.21.3 rev 33110, cluster member lxd-node1; cluster healthy 3 units/3 members"
     )
 
 
@@ -842,5 +883,5 @@ def test_leader_blocks_on_mixed_cluster_state(monkeypatch):
     )
 
     assert state_out.unit_status == testing.BlockedStatus(
-        "Cluster mismatch: mixed standalone and clustered units"
+        "lxd-node1: Cluster mismatch: mixed standalone and clustered units"
     )
