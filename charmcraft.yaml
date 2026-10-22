@@ -26,6 +26,10 @@ peers:
     interface: lxd_host_peers
 
 provides:
+  netbox-inventory:
+    interface: lxd_inventory
+    scope: container
+    description: Local LXD identity and readiness for the NetBox inventory subordinate.
   metrics-endpoint:
     interface: prometheus_scrape
     description: LXD metrics scrape target for observability consumers.
