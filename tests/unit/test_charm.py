@@ -9,7 +9,10 @@ from lxd import LXDValidationError
 
 META = {
     "name": "lxd-host",
-    "provides": {"metrics-endpoint": {"interface": "prometheus_scrape"}},
+    "provides": {
+        "metrics-endpoint": {"interface": "prometheus_scrape"},
+        "netbox-inventory": {"interface": "lxd_inventory", "scope": "container"},
+    },
     "requires": {
         "logging": {"interface": "loki_push_api"},
         "syslog": {"interface": "syslog"},
@@ -285,6 +288,7 @@ def test_non_leader_metrics_relation_broken_uses_peer_trust_name(monkeypatch):
     )
     monkeypatch.setattr("charm.logging_config.active_loki_endpoint", lambda charm: None)
     monkeypatch.setattr("charm.logging_config.active_syslog_target", lambda charm: None)
+    monkeypatch.setattr("charm.logging_config.reconcile", lambda charm, inventory: False)
 
     state_out = ctx.run(
         ctx.on.relation_broken(relation),
@@ -574,9 +578,7 @@ def test_logging_relation_does_not_reconcile_metrics(monkeypatch):
     )
     monkeypatch.setattr(
         "charm.metrics.reconcile",
-        lambda charm, inventory: (_ for _ in ()).throw(
-            AssertionError("metrics should not run")
-        ),
+        lambda charm, inventory: (_ for _ in ()).throw(AssertionError("metrics should not run")),
     )
     monkeypatch.setattr("charm.metrics.has_metrics_relation", lambda charm: True)
     monkeypatch.setattr("charm.logging_config.reconcile", lambda charm, inventory: True)
@@ -627,7 +629,8 @@ def test_transient_loki_error_sets_waiting_status(monkeypatch):
     )
 
     assert state_out.unit_status == testing.WaitingStatus(
-        "lxd-node1: Waiting for Loki readiness: Loki is not ready, server returned HTTP status 404 Not Found"
+        "lxd-node1: Waiting for Loki readiness: Loki is not ready, "
+        "server returned HTTP status 404 Not Found"
     )
 
 
@@ -839,7 +842,8 @@ def test_leader_reports_healthy_cluster_summary(monkeypatch):
     )
 
     assert state_out.unit_status == testing.ActiveStatus(
-        "lxd-node1: snap 5.21.3 rev 33110, cluster member lxd-node1; cluster healthy 3 units/3 members"
+        "lxd-node1: snap 5.21.3 rev 33110, cluster member lxd-node1; "
+        "cluster healthy 3 units/3 members"
     )
 
 

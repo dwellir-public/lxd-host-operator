@@ -145,3 +145,18 @@ That asset exists to validate the live LXD metrics and Loki label contract
 against the dashboard shape users actually import. The local copy carries the
 Juju-job compatibility fix and a small set of query corrections for multi-value
 instance selection and rootfs filesystem matching.
+
+
+## NetBox inventory subordinate
+
+The container-scoped `netbox-inventory` endpoint provides `lxd_inventory` version
+1. Unit data publishes `ready`, `version`, local LXD `hostname`, `clustered`, JSON
+`members` and the snap LXD socket path. Unavailable validation revokes readiness
+and clears stale facts. No credentials are exchanged, and relation events do not
+reconfigure observability services. The subordinate owns its reader/writer
+services and does not install or configure LXD.
+
+All inventory reads share the readiness publisher, including early validation
+failures in metrics integration handlers. Regular reconciliation refreshes facts;
+both leader and nonleader units publish their own local identity. The wire format
+and integration command are documented in [NetBox inventory](netbox-inventory.md).
