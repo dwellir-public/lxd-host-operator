@@ -15,6 +15,7 @@ import inventory
 import logging_config
 import lxd
 import metrics
+import netbox_inventory
 import status
 
 logger = logging.getLogger(__name__)
@@ -43,6 +44,11 @@ class LxdHostCharm(ops.CharmBase):
         framework.observe(self.on.start, self._on_reconcile)
         framework.observe(self.on.update_status, self._on_reconcile)
         framework.observe(self.on.leader_elected, self._on_reconcile)
+        for event in (
+            self.on[netbox_inventory.ENDPOINT].relation_joined,
+            self.on[netbox_inventory.ENDPOINT].relation_changed,
+        ):
+            framework.observe(event, self._on_netbox_inventory)
         for peer_event in (
             self.on[cluster_state.PEER_RELATION_NAME].relation_created,
             self.on[cluster_state.PEER_RELATION_NAME].relation_joined,
@@ -84,7 +90,7 @@ class LxdHostCharm(ops.CharmBase):
     ) -> None:
         """Validate the local LXD host and publish phase-1 status/version facts."""
         try:
-            local_inventory = inventory.collect_local_inventory()
+            local_inventory = self._collect_inventory()
         except lxd.LXDValidationError as exc:
             self.unit.status = ops.BlockedStatus(f"LXD unavailable: {exc}")
             return
@@ -129,6 +135,23 @@ class LxdHostCharm(ops.CharmBase):
             return
         self.unit.status = status.render_unit_status(local_inventory, cluster_assessment.summary)
 
+    def _collect_inventory(self) -> inventory.LocalLXDInventory:
+        """Publish current local identity or revoke readiness on any validation failure."""
+        try:
+            local_inventory = inventory.collect_local_inventory()
+        except lxd.LXDValidationError:
+            netbox_inventory.publish(self, None)
+            raise
+        netbox_inventory.publish(self, local_inventory)
+        return local_inventory
+
+    def _on_netbox_inventory(self, _event: ops.RelationEvent) -> None:
+        """Publish subordinate identity without changing observability services."""
+        try:
+            self._collect_inventory()
+        except lxd.LXDValidationError:
+            logger.warning("LXD unavailable; NetBox inventory readiness revoked")
+
     def _on_relation_event(self, event: ops.RelationEvent) -> None:
         """Reconcile when relation changes may affect metrics publication."""
         if event.relation.name not in {
@@ -140,7 +163,7 @@ class LxdHostCharm(ops.CharmBase):
             return
         if event.relation.name == metrics.METRICS_RELATION_NAME:
             try:
-                local_inventory = inventory.collect_local_inventory()
+                local_inventory = self._collect_inventory()
             except lxd.LXDValidationError as exc:
                 self.unit.status = ops.BlockedStatus(f"LXD unavailable: {exc}")
                 return
@@ -161,7 +184,7 @@ class LxdHostCharm(ops.CharmBase):
         """Cleanup trust for a broken metrics relation and reconcile remaining state."""
         if event.relation.name == metrics.METRICS_RELATION_NAME:
             try:
-                local_inventory = inventory.collect_local_inventory()
+                local_inventory = self._collect_inventory()
             except lxd.LXDValidationError as exc:
                 self.unit.status = ops.BlockedStatus(f"LXD unavailable: {exc}")
                 return
