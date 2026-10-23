@@ -109,3 +109,94 @@ def test_regular_reconciliation_updates_member_facts(monkeypatch):
         "host-a",
         "host-c",
     ]
+
+
+def https_context(monkeypatch):
+    monkeypatch.setattr(
+        "charm.inventory.collect_local_inventory",
+        lambda: LocalLXDInventory("5.21.8", "1", "5.21.8", "host-a", False),
+    )
+    monkeypatch.setattr("charm.metrics.reconcile", lambda *_args: False)
+    monkeypatch.setattr("charm.logging_config.reconcile", lambda *_args: False)
+    monkeypatch.setattr(
+        "netbox_inventory.netbox_access.certificate_fingerprint", lambda _cert: "fingerprint"
+    )
+    return testing.Context(LxdHostCharm, meta=META)
+
+
+def test_https_extension_preserves_v1_and_registers_only_public_certificate(monkeypatch):
+    ctx = https_context(monkeypatch)
+    relation = testing.SubordinateRelation(
+        "netbox-inventory",
+        interface="lxd_inventory",
+        remote_unit_data={
+            "versions": "2",
+            "client-certificate": "public certificate",
+        },
+    )
+    register = Mock(
+        return_value={
+            "https-url": "https://host-a:8443",
+            "server-certificate": "public server",
+            "client-fingerprint": "fingerprint",
+        }
+    )
+    monkeypatch.setattr("netbox_inventory.netbox_access.reconcile", register)
+    state = ctx.run(ctx.on.relation_changed(relation), testing.State(relations={relation}))
+    data = state.get_relation(relation.id).local_unit_data
+    assert data["version"] == "1" and data["ready"] == "true"
+    assert data["socket"] == "/var/snap/lxd/common/lxd/unix.socket"
+    assert data["https-version"] == "2" and data["https-ready"] == "true"
+    assert register.call_args.args[-1] == "public certificate"
+    assert not state.get_relation(relation.id).local_app_data
+    saved = next(s for s in state.stored_states if s.name == "_netbox_state").content
+    assert len(saved["registrations"]) == 1
+
+
+def test_https_setup_failure_does_not_break_legacy_consumer_contract(monkeypatch):
+    from netbox_access import AccessError
+
+    ctx = https_context(monkeypatch)
+    relation = testing.SubordinateRelation(
+        "netbox-inventory",
+        interface="lxd_inventory",
+        remote_unit_data={
+            "versions": "2",
+            "client-certificate": "public certificate",
+        },
+    )
+    monkeypatch.setattr(
+        "netbox_inventory.netbox_access.reconcile", Mock(side_effect=AccessError("Enable HTTPS"))
+    )
+    state = ctx.run(ctx.on.relation_changed(relation), testing.State(relations={relation}))
+    data = state.get_relation(relation.id).local_unit_data
+    assert data["ready"] == "true" and data["version"] == "1"
+    assert data["https-ready"] == "false" and data["https-error"] == "Enable HTTPS"
+
+
+def test_broken_relation_revokes_saved_owned_identity_and_retries_api_failure(monkeypatch):
+    from dataclasses import replace
+
+    from netbox_access import AccessError
+
+    ctx = https_context(monkeypatch)
+    relation = testing.SubordinateRelation(
+        "netbox-inventory",
+        interface="lxd_inventory",
+        remote_unit_data={
+            "versions": "2",
+            "client-certificate": "public certificate",
+        },
+    )
+    monkeypatch.setattr("netbox_inventory.netbox_access.reconcile", Mock(return_value={}))
+    state = ctx.run(ctx.on.relation_changed(relation), testing.State(relations={relation}))
+    revoke = Mock(side_effect=AccessError("temporarily unavailable"))
+    monkeypatch.setattr("netbox_inventory.netbox_access.revoke", revoke)
+    state = ctx.run(ctx.on.relation_broken(state.get_relation(relation.id)), state)
+    saved = next(s for s in state.stored_states if s.name == "_netbox_state").content
+    assert len(saved["registrations"]) == 1
+    revoke.side_effect = None
+    state = ctx.run(ctx.on.update_status(), replace(state, relations=frozenset()))
+    saved = next(s for s in state.stored_states if s.name == "_netbox_state").content
+    assert not saved["registrations"]
+    assert revoke.call_count == 2

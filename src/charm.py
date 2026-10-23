@@ -24,9 +24,12 @@ logger = logging.getLogger(__name__)
 class LxdHostCharm(ops.CharmBase):
     """Observe lifecycle events and report local LXD validity and identity."""
 
+    _netbox_state = ops.StoredState()
+
     def __init__(self, framework: ops.Framework):
         """Wire the phase-1 lifecycle handlers."""
         super().__init__(framework)
+        self._netbox_state.set_default(registrations={})
         self._metrics_provider = MetricsEndpointProvider(
             self,
             relation_name=metrics.METRICS_RELATION_NAME,
@@ -49,6 +52,12 @@ class LxdHostCharm(ops.CharmBase):
             self.on[netbox_inventory.ENDPOINT].relation_changed,
         ):
             framework.observe(event, self._on_netbox_inventory)
+        framework.observe(
+            self.on[netbox_inventory.ENDPOINT].relation_departed, self._on_netbox_departed
+        )
+        framework.observe(
+            self.on[netbox_inventory.ENDPOINT].relation_broken, self._on_netbox_departed
+        )
         for peer_event in (
             self.on[cluster_state.PEER_RELATION_NAME].relation_created,
             self.on[cluster_state.PEER_RELATION_NAME].relation_joined,
@@ -151,6 +160,11 @@ class LxdHostCharm(ops.CharmBase):
             self._collect_inventory()
         except lxd.LXDValidationError:
             logger.warning("LXD unavailable; NetBox inventory readiness revoked")
+
+    def _on_netbox_departed(self, event: ops.RelationEvent) -> None:
+        """Revoke only identities owned by this departed integration/unit."""
+        departing = getattr(event, "departing_unit", None)
+        netbox_inventory.prune(self, event.relation.id, departing.name if departing else None)
 
     def _on_relation_event(self, event: ops.RelationEvent) -> None:
         """Reconcile when relation changes may affect metrics publication."""

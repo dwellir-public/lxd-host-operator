@@ -62,3 +62,31 @@ Notes:
   snapshots intentionally do not include the snap
 - the Alloy scenario deploys `alloy-vm` with `enable-syslogreceivers=true`
   because the `syslog-receiver` relation is otherwise advertised as disabled
+
+## NetBox inventory HTTPS integration
+
+The `netbox-inventory` integration preserves version 1 fields for existing
+consumers and adds HTTPS access for consumers publishing `versions=2` and a
+public `client-certificate`. The server needs `access_management_tls` (5.21.3+)
+and an existing HTTPS listener. The charm does not expose or rebind the listener.
+
+Each provider/consumer unit pair gets an owned fine-grained TLS identity and
+group with exactly `can_view_projects` and `can_view_events` on the server. There
+are no management, execution or guest-file permissions. Private keys remain on
+the scraper unit. Unit data adds `https-version`, `https-ready`, `https-url`,
+`server-certificate`, `client-fingerprint` and, when needed, a safe `https-error`.
+Version 1 consumers ignore these additional fields, including after rollback.
+
+Registration is idempotent and certificate changes update the owned identity.
+Groups whose ownership marker differs are never changed. Departures revoke only
+owned identities; groups used by another identity are preserved. Pending cleanup
+is stored and retried after transient API failures on later hooks. These handlers
+do not reconcile observability services or restart LXD.
+
+Validate with the scraper's HTTPS inventory tests and both matching local
+artifacts. In the authorized `server1` test VM (5.21.8), registration, repeated
+reconciliation, rotation and revocation passed. Read-only HTTPS/WSS worked; seven
+write/exec/file/admin requests were denied with HTTP 403. Probe identities, group,
+project and stopped instance were removed and the temporary loopback listener
+restored. Clustered enrollment and full Juju artifact refresh/rollback remain
+unverified. Repeat permission checks with disposable fixtures, never live guests.
