@@ -65,9 +65,7 @@ def reconcile(charm: ops.CharmBase, local_inventory: LocalLXDInventory) -> bool:
     return True
 
 
-def publish_unit_metadata(
-    charm: ops.CharmBase, relation: ops.Relation, local_inventory
-) -> None:
+def publish_unit_metadata(charm: ops.CharmBase, relation: ops.Relation, local_inventory) -> None:
     """Publish per-unit metadata on one metrics relation during a relation hook."""
     relation.data[charm.unit][METRICS_JOB_NAME_FIELD] = local_inventory.server_name
 

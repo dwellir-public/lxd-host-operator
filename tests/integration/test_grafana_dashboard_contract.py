@@ -50,7 +50,10 @@ def test_dashboard_contract_scenario(testbed: helpers.Testbed, charm_path, app_n
         mimir_payload = helpers.http_json(
             f"{mimir_base_url}/prometheus/api/v1/query",
             params={
-                "query": f'count by (job) (up{{juju_model="{model_name}",juju_application="{app_name}"}})'
+                "query": (
+                    f'count by (job) (up{{juju_model="{model_name}",'
+                    f'juju_application="{app_name}"}})'
+                )
             },
         )
         last_metric_jobs = {

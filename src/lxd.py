@@ -231,11 +231,11 @@ def ensure_metrics_certificate_trusted(*, trust_name: str, certificate_pem: str)
         except LXDValidationError as exc:
             if "Certificate already in trust store" not in str(exc):
                 raise
-            for entry in list_trust_entries():
-                if entry.type != "metrics":
-                    continue
-                if normalize_pem(entry.certificate) == desired_certificate:
-                    return
+            if any(
+                entry.type == "metrics" and normalize_pem(entry.certificate) == desired_certificate
+                for entry in list_trust_entries()
+            ):
+                return
             raise
     finally:
         try:

@@ -90,3 +90,32 @@ write/exec/file/admin requests were denied with HTTP 403. Probe identities, grou
 project and stopped instance were removed and the temporary loopback listener
 restored. Clustered enrollment and full Juju artifact refresh/rollback remain
 unverified. Repeat permission checks with disposable fixtures, never live guests.
+
+## GitHub CI and releases
+
+`.github/workflows/release.yml` checks lint and unit tests and builds all three
+amd64 bases for pull requests, pushes to `main`, and manual dispatches. Ubuntu
+20.04 builds in LXD on an Ubuntu 22.04 runner; the other bases build directly
+on matching runners. Integration tests require the dedicated VM fixtures
+listed above and do not run on GitHub hosted runners.
+
+After checks and every build succeed on `main`, CI uploads each artifact to
+Charmhub `latest/edge` and creates a GitHub prerelease containing the artifacts,
+source commit, and per-base Charmhub revisions. Stable promotion is manual.
+
+The repository secret `CHARMHUB_TOKEN` supplies `CHARMCRAFT_AUTH`. It is scoped
+to `lxd-host`, `latest/edge`, package viewing, uploading revisions, and releasing.
+The initial credential expires one year after creation on 2026-10-24. Renew it
+with `charmcraft login --export` before expiry and replace the GitHub secret.
+The exported credential file must stay outside Git and must not appear in logs.
+
+To promote an inspected main build, verify the GitHub release's source commit
+and each base's revision, then use separately authorized stable credentials:
+
+```bash
+charmcraft release lxd-host --revision <revision> --channel latest/stable
+charmcraft status lxd-host
+```
+
+Repeat the release command for each base's revision. Verify the final channel
+map and do not infer live deployment coverage from passing build/unit checks.

@@ -22,15 +22,11 @@ def render_unit_status(
     return ops.ActiveStatus(prefixed_message(inventory, message))
 
 
-def render_blocked_status(
-    inventory: LocalLXDInventory, message: str
-) -> ops.BlockedStatus:
+def render_blocked_status(inventory: LocalLXDInventory, message: str) -> ops.BlockedStatus:
     """Render a blocked status prefixed with the local LXD hostname."""
     return ops.BlockedStatus(prefixed_message(inventory, message))
 
 
-def render_waiting_status(
-    inventory: LocalLXDInventory, message: str
-) -> ops.WaitingStatus:
+def render_waiting_status(inventory: LocalLXDInventory, message: str) -> ops.WaitingStatus:
     """Render a waiting status prefixed with the local LXD hostname."""
     return ops.WaitingStatus(prefixed_message(inventory, message))
