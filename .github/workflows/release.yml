@@ -58,12 +58,21 @@ jobs:
         run: |
           sudo snap install lxd --channel 5.21/stable
           sudo lxd init --auto
+          # Docker's forwarding policy can block the LXD build container.
+          sudo iptables -I DOCKER-USER -i lxdbr0 -j ACCEPT
+          sudo iptables -I DOCKER-USER -o lxdbr0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+          sudo ip6tables -I DOCKER-USER -i lxdbr0 -j ACCEPT
+          sudo ip6tables -I DOCKER-USER -o lxdbr0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
       - name: Build Ubuntu 20.04 in LXD
         if: matrix.base == '20.04'
-        run: sudo charmcraft pack --use-lxd --platform ubuntu@20.04:amd64 --quiet
+        run: sudo charmcraft pack --use-lxd --platform ubuntu@20.04:amd64
       - name: Build on matching host base
         if: matrix.base != '20.04'
         run: sudo charmcraft pack --destructive-mode --platform ubuntu@${{ matrix.base }}:amd64 --quiet
+      - name: Show build diagnostics on failure
+        if: failure()
+        run: |
+          sudo find /root/.local/state/charmcraft/log -name '*.log' -type f -exec tail -n 150 {} +
       - name: Upload charm artifact
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
