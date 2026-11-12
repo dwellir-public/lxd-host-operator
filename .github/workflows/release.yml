@@ -17,6 +17,10 @@ jobs:
   checks:
     name: Lint and unit tests
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.14"]
     steps:
       - name: Checkout
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -25,13 +29,13 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python }}
       - name: Set up uv
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
       - name: Run checks
         run: |
           uv sync --locked --group dev
-          uvx tox -e lint,unit
+          uvx --python '${{ matrix.python }}' tox -e lint,unit
 
   build:
     name: Build ubuntu@${{ matrix.base }}:amd64
@@ -41,10 +45,14 @@ jobs:
         include:
           - base: "20.04"
             runner: ubuntu-22.04
+            use-lxd: true
           - base: "22.04"
             runner: ubuntu-22.04
           - base: "24.04"
             runner: ubuntu-24.04
+          - base: "26.04"
+            runner: ubuntu-24.04
+            use-lxd: true
     runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout
@@ -53,8 +61,8 @@ jobs:
           persist-credentials: false
       - name: Install Charmcraft
         run: sudo snap install charmcraft --classic --channel latest/stable
-      - name: Set up LXD for Ubuntu 20.04 build
-        if: matrix.base == '20.04'
+      - name: Set up LXD build environment
+        if: matrix.use-lxd
         run: |
           sudo snap install lxd --channel 5.21/stable
           sudo lxd init --auto
@@ -63,11 +71,11 @@ jobs:
           sudo iptables -I DOCKER-USER -o lxdbr0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
           sudo ip6tables -I DOCKER-USER -i lxdbr0 -j ACCEPT
           sudo ip6tables -I DOCKER-USER -o lxdbr0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
-      - name: Build Ubuntu 20.04 in LXD
-        if: matrix.base == '20.04'
-        run: sudo charmcraft pack --use-lxd --platform ubuntu@20.04:amd64
+      - name: Build in LXD
+        if: matrix.use-lxd
+        run: sudo charmcraft pack --use-lxd --platform ubuntu@${{ matrix.base }}:amd64
       - name: Build on matching host base
-        if: matrix.base != '20.04'
+        if: ${{ !matrix.use-lxd }}
         run: sudo charmcraft pack --destructive-mode --platform ubuntu@${{ matrix.base }}:amd64 --quiet
       - name: Show build diagnostics on failure
         if: failure()
@@ -76,7 +84,7 @@ jobs:
       - name: Upload charm artifact
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
-          name: charm-ubuntu-${{ matrix.base == '20.04' && '20' || matrix.base == '22.04' && '22' || '24' }}-amd64
+          name: charm-ubuntu-${{ matrix.base }}-amd64
           path: ./lxd-host_ubuntu@${{ matrix.base }}-amd64.charm
           if-no-files-found: error
 
@@ -91,6 +99,7 @@ jobs:
       rev_ubuntu_20: ${{ steps.upload_ubuntu_20.outputs.revision }}
       rev_ubuntu_22: ${{ steps.upload_ubuntu_22.outputs.revision }}
       rev_ubuntu_24: ${{ steps.upload_ubuntu_24.outputs.revision }}
+      rev_ubuntu_26: ${{ steps.upload_ubuntu_26.outputs.revision }}
       release_channel: latest/edge
     permissions:
       actions: read
@@ -165,6 +174,24 @@ jobs:
 
           echo "revision=$revision" >> "$GITHUB_OUTPUT"
 
+      - name: Upload ubuntu@26.04 charm to Charmhub edge
+        id: upload_ubuntu_26
+        env:
+          CHARMCRAFT_AUTH: "${{ secrets.CHARMHUB_TOKEN }}"
+        run: |
+          set -euo pipefail
+
+          output="$(charmcraft upload --format json --release latest/edge ./lxd-host_ubuntu@26.04-amd64.charm)"
+          echo "$output"
+
+          revision="$(python3 -c 'import json, sys; print(json.loads(sys.stdin.read())["revision"])' <<< "$output")"
+          if [[ ! "$revision" =~ ^[1-9][0-9]*$ ]]; then
+            echo "Charmcraft upload JSON did not include a positive integer revision for ubuntu@26.04" >&2
+            exit 1
+          fi
+
+          echo "revision=$revision" >> "$GITHUB_OUTPUT"
+
   github-release:
     name: Create GitHub release
     needs:
@@ -193,6 +220,7 @@ jobs:
           REVISION_20: ${{ needs.release.outputs.rev_ubuntu_20 }}
           REVISION_22: ${{ needs.release.outputs.rev_ubuntu_22 }}
           REVISION_24: ${{ needs.release.outputs.rev_ubuntu_24 }}
+          REVISION_26: ${{ needs.release.outputs.rev_ubuntu_26 }}
         run: |
           set -euo pipefail
 
@@ -213,7 +241,12 @@ jobs:
             exit 1
           fi
 
-          tag="latest-edge-r${REVISION_20}-r${REVISION_22}-r${REVISION_24}"
+          if [[ ! "$REVISION_26" =~ ^[1-9][0-9]*$ ]]; then
+            echo "Missing or invalid ubuntu@26.04 Charmhub revision output" >&2
+            exit 1
+          fi
+
+          tag="latest-edge-r${REVISION_20}-r${REVISION_22}-r${REVISION_24}-r${REVISION_26}"
           name="Charm release ${tag}"
 
           {
@@ -225,6 +258,7 @@ jobs:
             echo "- ubuntu@20.04:amd64 revision: \`${REVISION_20}\`"
             echo "- ubuntu@22.04:amd64 revision: \`${REVISION_22}\`"
             echo "- ubuntu@24.04:amd64 revision: \`${REVISION_24}\`"
+            echo "- ubuntu@26.04:amd64 revision: \`${REVISION_26}\`"
             echo
             echo "Source commit: \`${GITHUB_SHA}\`."
             echo "EOF"
@@ -237,7 +271,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [[ ! "$TAG" =~ ^latest-edge-r[1-9][0-9]*-r[1-9][0-9]*-r[1-9][0-9]*$ ]]; then
+          if [[ ! "$TAG" =~ ^latest-edge-r[1-9][0-9]*-r[1-9][0-9]*-r[1-9][0-9]*-r[1-9][0-9]*$ ]]; then
             echo "Invalid release tag: $TAG" >&2
             exit 1
           fi
@@ -270,3 +304,4 @@ jobs:
             ./lxd-host_ubuntu@20.04-amd64.charm
             ./lxd-host_ubuntu@22.04-amd64.charm
             ./lxd-host_ubuntu@24.04-amd64.charm
+            ./lxd-host_ubuntu@26.04-amd64.charm

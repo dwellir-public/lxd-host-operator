@@ -33,6 +33,7 @@ To build a specific base artifact explicitly:
 charmcraft pack --platform ubuntu@22.04:amd64
 charmcraft pack --platform ubuntu@24.04:amd64
 charmcraft pack --platform ubuntu@20.04:amd64
+charmcraft pack --platform ubuntu@26.04:amd64
 ```
 
 ## Integration tests
@@ -93,11 +94,12 @@ unverified. Repeat permission checks with disposable fixtures, never live guests
 
 ## GitHub CI and releases
 
-`.github/workflows/release.yml` checks lint and unit tests and builds all three
-amd64 bases for pull requests, pushes to `main`, and manual dispatches. Ubuntu
-20.04 builds in LXD on an Ubuntu 22.04 runner; the other bases build directly
-on matching runners. Integration tests require the dedicated VM fixtures
-listed above and do not run on GitHub hosted runners.
+`.github/workflows/release.yml` checks lint and unit tests on Python 3.12 and
+3.14 and builds all four amd64 bases for pull requests, pushes to `main`, and
+manual dispatches. Ubuntu 20.04 builds in LXD on an Ubuntu 22.04 runner, and
+Ubuntu 26.04 builds in LXD on an Ubuntu 24.04 runner. Ubuntu 22.04 and 24.04
+build directly on matching runners. Integration tests require the dedicated VM
+fixtures listed above and do not run on GitHub hosted runners.
 
 After checks and every build succeed on `main`, CI uploads each artifact to
 Charmhub `latest/edge` and creates a GitHub prerelease containing the artifacts,
