@@ -6,7 +6,7 @@
 already installed LXD snap. It does not install LXD, bootstrap a daemon, or
 change cluster topology.
 
-The charm declares Ubuntu 20.04, 22.04, 24.04 and 26.04 on amd64 as supported
+The charm declares Ubuntu 22.04, 24.04 and 26.04 on amd64 as supported
 packaging platforms.
 
 ## Current shape

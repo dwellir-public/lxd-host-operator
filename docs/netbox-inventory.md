@@ -51,7 +51,7 @@ charmcraft pack --platform ubuntu@26.04:amd64
 ```
 
 The scraper subordinate supports Ubuntu 22.04 and 24.04. The principal's Ubuntu
-20.04 and 26.04 declarations do not extend the subordinate's supported bases.
+26.04 declaration does not extend the subordinate's supported bases.
 A live test requires an explicitly selected disposable
 machine model, existing LXD and the subordinate's NetBox fixtures. Unit tests and
 builds alone do not verify deployed co-location or event delivery.
