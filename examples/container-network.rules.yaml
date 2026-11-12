@@ -1,0 +1,91 @@
+# Draft only: not auto-forwarded by the charm. Deploy per regional datasource
+# after collector coverage, notification routing and a published runbook are approved.
+groups:
+  - name: container-network
+    interval: 1m
+    rules:
+      - record: lxd:container_network_bits_per_second:rate1m
+        expr: |
+          label_replace(
+            8 * max by (lxd_host, project, name, device) (
+              rate(lxd_network_receive_bytes_total{type="container",device!="lo",lxd_host!=""}[1m])
+            ), "direction", "inbound", "name", ".*"
+          )
+          or
+          label_replace(
+            8 * max by (lxd_host, project, name, device) (
+              rate(lxd_network_transmit_bytes_total{type="container",device!="lo",lxd_host!=""}[1m])
+            ), "direction", "outbound", "name", ".*"
+          )
+      - record: lxd:container_network_limit_bits_per_second
+        expr: |
+          min by (lxd_host, project, name, device, direction) (
+            lxd_network_limit_bits_per_second{lxd_host!=""} > 0
+          )
+          and on (lxd_host)
+            (max by (lxd_host) (lxd_network_limits_collection_success) == 1)
+          and on (lxd_host)
+            (time() - max by (lxd_host) (lxd_network_limits_last_success_timestamp_seconds) < 90)
+      - record: lxd:container_network_utilization:ratio
+        expr: |
+          lxd:container_network_bits_per_second:rate1m
+          / on (lxd_host, project, name, device, direction)
+          lxd:container_network_limit_bits_per_second
+      - alert: ContainerNetworkNearConfiguredLimit
+        expr: lxd:container_network_utilization:ratio > 0.8
+        for: 5m
+        labels:
+          severity: warning
+          level: "3"
+          component: container-network
+        annotations:
+          summary: '{{ $labels.name }} {{ $labels.direction }} traffic exceeds 80% of its configured cap'
+          description: >-
+            Inspect the expanded NIC configuration, host/uplink capacity and tc
+            counters on {{ $labels.lxd_host }}. Traffic and cap are matched by
+            host, project, container, guest device and direction. Short bursts
+            can cause policing below this average. See the draft runbook in
+            docs/operations/container-network-limits.md before approving rollout.
+      - alert: ContainerNetworkLimitCollectorUnhealthy
+        expr: |
+          (max by (lxd_host) (up{lxd_collector="network-limits"}) == 0)
+          or (max by (lxd_host) (lxd_network_limits_collection_success) == 0)
+          or (time() - max by (lxd_host) (lxd_network_limits_last_success_timestamp_seconds) >= 90)
+        for: 2m
+        labels:
+          severity: warning
+          level: "3"
+          component: container-network
+        annotations:
+          summary: 'Network-limit collection is unhealthy on {{ $labels.lxd_host }}'
+      - alert: ContainerNetworkLimitCoverageMissing
+        expr: |
+          (
+            count by (lxd_host) (
+              lxd_network_receive_bytes_total{type="container",device!="lo",lxd_host!=""}
+            )
+            unless on (lxd_host) lxd_network_limits_collection_success
+          )
+          or
+          count by (instance) (
+            lxd_network_receive_bytes_total{type="container",device!="lo",lxd_host=""}
+          )
+        for: 5m
+        labels:
+          severity: warning
+          level: "3"
+          component: container-network
+        annotations:
+          summary: 'Container traffic has no matching collector or lxd_host identity'
+      - alert: ContainerNetworkLimitedTrafficMissing
+        expr: |
+          lxd_network_limit_state{state="limited"}
+          unless on (lxd_host, project, name, device, direction)
+          lxd:container_network_bits_per_second:rate1m
+        for: 5m
+        labels:
+          severity: warning
+          level: "3"
+          component: container-network
+        annotations:
+          summary: 'No traffic telemetry for limited NIC {{ $labels.name }}/{{ $labels.device }}'

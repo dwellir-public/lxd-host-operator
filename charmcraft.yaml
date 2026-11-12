@@ -25,6 +25,16 @@ peers:
   cluster:
     interface: lxd_host_peers
 
+config:
+  options:
+    network-limits-enabled:
+      type: boolean
+      default: false
+      description: |
+        Serve effective running-container NIC caps on port 9445 using the
+        metrics relation's mutual TLS credentials. Adds a companion scrape
+        job and lxd_host join label to both jobs. Does not alter LXD NIC limits.
+
 provides:
   netbox-inventory:
     interface: lxd_inventory

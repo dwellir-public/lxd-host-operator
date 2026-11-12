@@ -160,3 +160,20 @@ All inventory reads share the readiness publisher, including early validation
 failures in metrics integration handlers. Regular reconciliation refreshes facts;
 both leader and nonleader units publish their own local identity. The wire format
 and integration command are documented in [NetBox inventory](netbox-inventory.md).
+
+## Optional network-cap collector
+
+`network_limits.py` is a standalone, read-only local LXD inventory reader with a
+mutually authenticated metrics endpoint on port 9445. It exports expanded NIC
+caps and collection health; `network_limits_service.py` owns only its optional
+systemd service and files. `metrics.py` publishes the second scrape job and a
+common target-derived `lxd_host` label when `network-limits-enabled` is true.
+
+The default false preserves native scraping. Config changes reconcile metrics
+without rewriting logging. Refreshes can restart an already opted-in companion
+when its own source/config changes; they never restart LXD or a guest. Last
+metrics-integration removal stops the companion even if LXD validation fails.
+Draft rules remain outside automatically forwarded artifact directories.
+
+See [network-cap operations](operations/container-network-limits.md) for the
+metric schema, security, standalone edge path, coverage gaps, rollout and rollback.

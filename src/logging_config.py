@@ -79,7 +79,7 @@ def active_loki_endpoint(charm: ops.CharmBase) -> Optional[str]:
     """Return one deterministic Loki base endpoint from the consumer library."""
     endpoints = [
         normalise_loki_endpoint(endpoint.get("url", "").strip())
-        for endpoint in charm._loki_consumer.loki_endpoints
+        for endpoint in getattr(charm, "_loki_consumer").loki_endpoints
         if isinstance(endpoint, dict)
     ]
     endpoints = sorted(endpoint for endpoint in endpoints if endpoint)

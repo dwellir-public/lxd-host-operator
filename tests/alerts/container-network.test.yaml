@@ -1,0 +1,136 @@
+rule_files:
+- ../../examples/container-network.rules.yaml
+evaluation_interval: 1m
+fuzzy_compare: true
+tests:
+- name: asymmetric caps and project identity remain separate
+  interval: 15s
+  input_series:
+  - series: lxd_network_receive_bytes_total{lxd_host="host-a",project="default",name="guest",device="eth0",type="container"}
+    values: 0+300000000x40
+  - series: lxd_network_transmit_bytes_total{lxd_host="host-a",project="default",name="guest",device="eth0",type="container"}
+    values: 0+150000000x40
+  - series: lxd_network_receive_bytes_total{lxd_host="host-a",project="other",name="guest",device="eth0",type="container"}
+    values: 0+300000000x40
+  - series: lxd_network_receive_bytes_total{lxd_host="host-b",project="default",name="guest",device="eth0",type="container"}
+    values: 0+300000000x40
+  - series: lxd_network_limit_bits_per_second{lxd_host="host-a",project="default",name="guest",device="eth0",direction="inbound"}
+    values: 300000000+0x40
+  - series: lxd_network_limit_bits_per_second{lxd_host="host-a",project="default",name="guest",device="eth0",direction="outbound"}
+    values: 100000000+0x40
+  - series: lxd_network_limit_bits_per_second{lxd_host="host-a",project="other",name="guest",device="eth0",direction="inbound"}
+    values: 600000000+0x40
+  - series: lxd_network_limit_bits_per_second{lxd_host="host-b",project="default",name="guest",device="eth0",direction="inbound"}
+    values: 100000000+0x40
+  - series: lxd_network_limits_collection_success{lxd_host="host-a"}
+    values: 1+0x40
+  - series: lxd_network_limits_collection_success{lxd_host="host-b"}
+    values: 1+0x40
+  - series: lxd_network_limits_last_success_timestamp_seconds{lxd_host="host-a"}
+    values: 0+15x40
+  - series: lxd_network_limits_last_success_timestamp_seconds{lxd_host="host-b"}
+    values: 0+15x40
+  - series: lxd_network_receive_bytes_total{lxd_host="host-a",project="default",name="guest",device="eth0",type="container",replica="duplicate"}
+    values: 0+300000000x40
+  - series: lxd_network_limit_bits_per_second{lxd_host="host-a",project="default",name="guest",device="eth0",direction="inbound",replica="duplicate"}
+    values: 300000000+0x40
+  promql_expr_test:
+  - expr: round(lxd:container_network_utilization:ratio, 0.000001)
+    eval_time: 2m
+    exp_samples:
+    - labels: '{lxd_host="host-a",project="default",name="guest",device="eth0",direction="inbound"}'
+      value: 0.533333
+    - labels: '{lxd_host="host-a",project="default",name="guest",device="eth0",direction="outbound"}'
+      value: 0.8
+    - labels: '{lxd_host="host-a",project="other",name="guest",device="eth0",direction="inbound"}'
+      value: 0.266667
+    - labels: '{lxd_host="host-b",project="default",name="guest",device="eth0",direction="inbound"}'
+      value: 1.6
+  alert_rule_test:
+  - eval_time: 4m
+    alertname: ContainerNetworkNearConfiguredLimit
+    exp_alerts: []
+  - eval_time: 7m
+    alertname: ContainerNetworkNearConfiguredLimit
+    exp_alerts:
+    - exp_labels:
+        lxd_host: host-b
+        project: default
+        name: guest
+        device: eth0
+        direction: inbound
+        severity: warning
+        level: '3'
+        component: container-network
+      exp_annotations:
+        summary: guest inbound traffic exceeds 80% of its configured cap
+        description: Inspect the expanded NIC configuration, host/uplink capacity and tc counters on host-b.
+          Traffic and cap are matched by host, project, container, guest device and direction. Short bursts
+          can cause policing below this average. See the draft runbook in docs/operations/container-network-limits.md
+          before approving rollout.
+- name: zero or missing limits are not finite caps
+  interval: 15s
+  input_series:
+  - series: lxd_network_receive_bytes_total{lxd_host="host-a",project="default",name="unlimited",device="eth0",type="container"}
+    values: 0+300000000x20
+  - series: lxd_network_limit_bits_per_second{lxd_host="host-a",project="default",name="unlimited",device="eth0",direction="inbound"}
+    values: 0+0x20
+  promql_expr_test:
+  - expr: lxd:container_network_utilization:ratio
+    eval_time: 2m
+    exp_samples: []
+- name: failed collection gates old cap samples
+  interval: 15s
+  input_series:
+  - series: lxd_network_receive_bytes_total{lxd_host="host-a",project="default",name="guest",device="eth0",type="container"}
+    values: 0+300000000x20
+  - series: lxd_network_limit_bits_per_second{lxd_host="host-a",project="default",name="guest",device="eth0",direction="inbound"}
+    values: 100000000+0x20
+  - series: lxd_network_limits_collection_success{lxd_host="host-a"}
+    values: 0+0x20
+  - series: lxd_network_limits_last_success_timestamp_seconds{lxd_host="host-a"}
+    values: 0+15x20
+  promql_expr_test:
+  - expr: lxd:container_network_utilization:ratio
+    eval_time: 2m
+    exp_samples: []
+  - expr: count(ALERTS{alertname="ContainerNetworkLimitCollectorUnhealthy",alertstate="firing"})
+    eval_time: 3m
+    exp_samples:
+    - labels: '{}'
+      value: 1
+- name: stale limit samples cannot produce a healthy ratio
+  interval: 15s
+  input_series:
+  - series: lxd_network_receive_bytes_total{lxd_host="host-a",project="default",name="guest",device="eth0",type="container"}
+    values: 0+300000000x20
+  - series: lxd_network_limit_bits_per_second{lxd_host="host-a",project="default",name="guest",device="eth0",direction="inbound"}
+    values: 100000000+0x20
+  - series: lxd_network_limits_collection_success{lxd_host="host-a"}
+    values: 1+0x20
+  - series: lxd_network_limits_last_success_timestamp_seconds{lxd_host="host-a"}
+    values: 0+0x20
+  promql_expr_test:
+  - expr: lxd:container_network_utilization:ratio
+    eval_time: 2m
+    exp_samples: []
+- name: cap change clears firing without changing traffic
+  interval: 15s
+  input_series:
+  - series: lxd_network_receive_bytes_total{lxd_host="host-a",project="default",name="guest",device="eth0",type="container"}
+    values: 0+180000000x40
+  - series: lxd_network_limit_bits_per_second{lxd_host="host-a",project="default",name="guest",device="eth0",direction="inbound"}
+    values: 100000000+0x27 300000000+0x12
+  - series: lxd_network_limits_collection_success{lxd_host="host-a"}
+    values: 1+0x40
+  - series: lxd_network_limits_last_success_timestamp_seconds{lxd_host="host-a"}
+    values: 0+15x40
+  promql_expr_test:
+  - expr: count(ALERTS{alertname="ContainerNetworkNearConfiguredLimit",alertstate="firing"})
+    eval_time: 6m
+    exp_samples:
+    - labels: '{}'
+      value: 1
+  - expr: ALERTS{alertname="ContainerNetworkNearConfiguredLimit",alertstate="firing"}
+    eval_time: 8m
+    exp_samples: []

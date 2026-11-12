@@ -33,6 +33,29 @@ jobs:
           uv sync --locked --group dev
           uvx tox -e lint,unit
 
+  promql:
+    name: Validate draft network alert rules
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Install pinned promtool
+        working-directory: ${{ runner.temp }}
+        run: |
+          curl --fail --location --silent --show-error \
+            https://github.com/prometheus/prometheus/releases/download/v3.16.0/prometheus-3.16.0.linux-amd64.tar.gz \
+            --output prometheus.tar.gz
+          printf '%s  %s\n' \
+            68727009472a2c02e1ff7f062fd5b3e637285bffc8fc2d340c76fb449d6e0f34 \
+            prometheus.tar.gz | sha256sum --check
+          tar -xzf prometheus.tar.gz --strip-components=1 prometheus-3.16.0.linux-amd64/promtool
+      - name: Check syntax and alert behavior
+        run: |
+          "$RUNNER_TEMP/promtool" check rules examples/container-network.rules.yaml
+          "$RUNNER_TEMP/promtool" test rules tests/alerts/container-network.test.yaml
+
   build:
     name: Build ubuntu@${{ matrix.base }}:amd64
     strategy:
@@ -85,6 +108,7 @@ jobs:
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     needs:
       - checks
+      - promql
       - build
     runs-on: ubuntu-latest
     outputs:

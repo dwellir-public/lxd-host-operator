@@ -13,6 +13,8 @@ import ops
 
 import cluster_state
 import lxd
+import network_limits
+import network_limits_service
 from inventory import LocalLXDInventory
 
 METRICS_RELATION_NAME = "metrics-endpoint"
@@ -42,8 +44,10 @@ def has_metrics_relation(charm: ops.CharmBase) -> bool:
 
 def reconcile(charm: ops.CharmBase, local_inventory: LocalLXDInventory) -> bool:
     """Reconcile the metrics listener, local trust, and scrape jobs for all relations."""
-    charm._metrics_provider.update_scrape_job_spec(base_scrape_jobs())
+    collect_limits = bool(charm.config.get("network-limits-enabled", False))
+    getattr(charm, "_metrics_provider").update_scrape_job_spec(base_scrape_jobs(collect_limits))
     if not has_metrics_relation(charm):
+        network_limits_service.disable()
         disable_metrics_listener()
         return False
 
@@ -59,9 +63,18 @@ def reconcile(charm: ops.CharmBase, local_inventory: LocalLXDInventory) -> bool:
                 certificate_pem=credentials.certificate_pem,
             )
         if charm.unit.is_leader():
-            relation.data[charm.app]["scrape_jobs"] = json.dumps(scrape_jobs(credentials))
+            relation.data[charm.app]["scrape_jobs"] = json.dumps(
+                scrape_jobs(credentials, collect_limits)
+            )
 
     enable_metrics_listener(desired_metrics_address(charm))
+    if collect_limits and credentials_by_relation_id:
+        address = str(charm.model.get_binding(METRICS_RELATION_NAME).network.bind_address)
+        network_limits_service.ensure(
+            address, [item.certificate_pem for item in credentials_by_relation_id.values()]
+        )
+    else:
+        network_limits_service.disable()
     return True
 
 
@@ -97,9 +110,9 @@ def should_manage_trust_store(
     return not local_inventory.server_clustered or charm.unit.is_leader()
 
 
-def base_scrape_jobs() -> list[dict]:
+def base_scrape_jobs(collect_limits: bool = False) -> list[dict]:
     """Return the provider job spec before relation-specific TLS injection."""
-    return [
+    jobs = [
         {
             "job_name": "lxd",
             "metrics_path": METRICS_PATH,
@@ -108,16 +121,48 @@ def base_scrape_jobs() -> list[dict]:
             "static_configs": [{"targets": [f"*:{METRICS_PORT}"]}],
         }
     ]
+    if collect_limits:
+        jobs.append(
+            {
+                "job_name": "lxd-network-limits",
+                "metrics_path": "/metrics",
+                "scheme": "https",
+                "scrape_interval": "30s",
+                "scrape_timeout": "20s",
+                "static_configs": [
+                    {
+                        "targets": [f"*:{network_limits.PORT}"],
+                        "labels": {"lxd_collector": "network-limits"},
+                    }
+                ],
+            }
+        )
+        for job in jobs:
+            job["relabel_configs"] = host_relabel_configs()
+    return jobs
 
 
-def scrape_jobs(credentials: MetricsCredentials) -> list[dict]:
+def host_relabel_configs() -> list[dict]:
+    """Give native and companion targets the same host identity, excluding their ports."""
+    return [
+        {
+            "source_labels": ["__address__"],
+            "regex": r"(.+):[0-9]+",
+            "target_label": "lxd_host",
+            "replacement": "$1",
+        }
+    ]
+
+
+def scrape_jobs(credentials: MetricsCredentials, collect_limits: bool = False) -> list[dict]:
     """Return the full scrape job including relation-specific client TLS material."""
-    jobs = base_scrape_jobs()
-    jobs[0]["tls_config"] = {
-        "insecure_skip_verify": True,
-        "cert_file": credentials.certificate_pem,
-        "key_file": credentials.private_key_pem,
-    }
+    jobs = base_scrape_jobs(collect_limits)
+    for job in jobs:
+        job["tls_config"] = {
+            "insecure_skip_verify": True,
+            "cert_file": credentials.certificate_pem,
+            "key_file": credentials.private_key_pem,
+        }
     return jobs
 
 

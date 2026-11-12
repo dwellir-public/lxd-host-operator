@@ -16,6 +16,7 @@ import logging_config
 import lxd
 import metrics
 import netbox_inventory
+import network_limits_service
 import status
 
 logger = logging.getLogger(__name__)
@@ -33,7 +34,7 @@ class LxdHostCharm(ops.CharmBase):
         self._metrics_provider = MetricsEndpointProvider(
             self,
             relation_name=metrics.METRICS_RELATION_NAME,
-            jobs=metrics.base_scrape_jobs(),
+            jobs=metrics.base_scrape_jobs(bool(self.config.get("network-limits-enabled", False))),
             refresh_event=[self.on.start, self.on.update_status],
             forward_alert_rules=False,
         )
@@ -45,6 +46,8 @@ class LxdHostCharm(ops.CharmBase):
         framework.observe(self.on.install, self._on_reconcile)
         framework.observe(self.on.upgrade_charm, self._on_reconcile)
         framework.observe(self.on.start, self._on_reconcile)
+        framework.observe(self.on.config_changed, self._on_config_changed)
+        framework.observe(self.on.remove, self._on_remove)
         framework.observe(self.on.update_status, self._on_reconcile)
         framework.observe(self.on.leader_elected, self._on_reconcile)
         for event in (
@@ -104,11 +107,15 @@ class LxdHostCharm(ops.CharmBase):
             self.unit.status = ops.BlockedStatus(f"LXD unavailable: {exc}")
             return
 
-        metrics_enabled = (
-            metrics.reconcile(self, local_inventory)
-            if reconcile_metrics
-            else metrics.has_metrics_relation(self)
-        )
+        try:
+            metrics_enabled = (
+                metrics.reconcile(self, local_inventory)
+                if reconcile_metrics
+                else metrics.has_metrics_relation(self)
+            )
+        except network_limits_service.ServiceError as exc:
+            self.unit.status = status.render_blocked_status(local_inventory, str(exc))
+            return
         try:
             logging_enabled = (
                 logging_config.reconcile(self, local_inventory)
@@ -154,6 +161,14 @@ class LxdHostCharm(ops.CharmBase):
         netbox_inventory.publish(self, local_inventory)
         return local_inventory
 
+    def _on_remove(self, _event: ops.EventBase) -> None:
+        """Remove the optional collector without stopping or reconfiguring LXD."""
+        network_limits_service.remove()
+
+    def _on_config_changed(self, event: ops.EventBase) -> None:
+        """Reconcile the collector option without rewriting logging configuration."""
+        self._on_reconcile(event, reconcile_logging=False)
+
     def _on_netbox_inventory(self, _event: ops.RelationEvent) -> None:
         """Publish subordinate identity without changing observability services."""
         try:
@@ -197,6 +212,8 @@ class LxdHostCharm(ops.CharmBase):
     def _on_relation_broken(self, event: ops.RelationBrokenEvent) -> None:
         """Cleanup trust for a broken metrics relation and reconcile remaining state."""
         if event.relation.name == metrics.METRICS_RELATION_NAME:
+            if not metrics.has_metrics_relation(self):
+                network_limits_service.disable()
             try:
                 local_inventory = self._collect_inventory()
             except lxd.LXDValidationError as exc:

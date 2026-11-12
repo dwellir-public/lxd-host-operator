@@ -119,3 +119,40 @@ charmcraft status lxd-host
 
 Repeat the release command for each base's revision. Verify the final channel
 map and do not infer live deployment coverage from passing build/unit checks.
+
+## Network-limit collector and draft rule tests
+
+Fast source validation (no LXD socket or Juju model required):
+
+```bash
+uv sync --locked --group dev
+PYTHONPATH=lib:src uv run pytest tests/unit
+uv run ruff check src tests
+uv run ruff format --check src tests
+uv run pyright --pythonpath .venv/bin/python src tests
+```
+
+The collector tests use temporary Unix sockets and real loopback TLS requests.
+They verify effective configuration, automatic discovery/removal, project/member
+filtering, managed networks, unit parsing, malformed responses, stale-cap removal,
+service lifecycle and client-certificate authentication. They install no services
+and contact no production daemon.
+
+With `promtool` 3.16.0 available:
+
+```bash
+promtool check rules examples/container-network.rules.yaml
+promtool test rules tests/alerts/container-network.test.yaml
+```
+
+CI downloads that official Prometheus release with a pinned SHA256 and validates
+both syntax and behavior. Tests cover asymmetric caps, duplicate scrapes, matching
+across projects and hosts, strict thresholds, firing/clearance after a cap change,
+and suppression of failed/stale or nonfinite denominators. The draft rules are
+not automatically forwarded to a collector or Grafana.
+
+Real charm/collector delivery and all-base packaging require separate build and
+nonproduction integration evidence. The existing integration helpers restore
+historical reusable VMs and hardcode another operator's controller and SSH paths;
+do not run them in a current or production model. Follow the explicit canary
+checks in [the rollout plan](docs/operations/container-network-limits.md) instead.
