@@ -47,10 +47,11 @@ the surrounding lifecycle and observability behavior.
 uv run --group unit pytest tests/unit
 charmcraft pack --platform ubuntu@22.04:amd64
 charmcraft pack --platform ubuntu@24.04:amd64
+charmcraft pack --platform ubuntu@26.04:amd64
 ```
 
-The scraper subordinate supports Ubuntu 22.04 and 24.04. The principal's existing
-Ubuntu 20.04 declaration is preserved; this integration does not extend the
-subordinate to that base. A live test requires an explicitly selected disposable
+The scraper subordinate supports Ubuntu 22.04 and 24.04. The principal's Ubuntu
+26.04 declaration does not extend the subordinate's supported bases.
+A live test requires an explicitly selected disposable
 machine model, existing LXD and the subordinate's NetBox fixtures. Unit tests and
 builds alone do not verify deployed co-location or event delivery.
